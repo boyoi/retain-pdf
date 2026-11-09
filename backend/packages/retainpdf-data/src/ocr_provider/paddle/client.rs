@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
-use reqwest::{multipart, Client, Response};
+use reqwest::{multipart, Client, ClientBuilder, Proxy, Response};
 use serde_json::{json, Value};
 
 use crate::config::PaddleRuntimeConfig;
@@ -56,7 +56,7 @@ impl PaddleJsonlDownload {
 }
 
 impl PaddleClient {
-    pub fn new(base_url: impl Into<String>, token: impl Into<String>) -> Self {
+    pub fn new(base_url: impl Into<String>, token: impl Into<String>) -> Result<Self> {
         Self::with_runtime(base_url, token, PaddleRuntimeConfig::from_env())
     }
 
@@ -64,9 +64,26 @@ impl PaddleClient {
         base_url: impl Into<String>,
         token: impl Into<String>,
         runtime: PaddleRuntimeConfig,
-    ) -> Self {
-        let http = build_http_client(&runtime);
-        Self::with_http_client(base_url, token, runtime, http)
+    ) -> Result<Self> {
+        let timeout = Duration::from_secs(runtime.request_timeout_secs);
+        let builder = Client::builder().connect_timeout(timeout).timeout(timeout);
+        let http = Self::configure_http_proxy(builder, &runtime)?
+            .build()
+            .context("initialize Paddle HTTP client")?;
+        Ok(Self::with_http_client(base_url, token, runtime, http))
+    }
+
+    /// 正式任务与密钥校验共用 Paddle 专用代理，保留各自的超时和重定向策略。
+    pub fn configure_http_proxy(
+        builder: ClientBuilder,
+        runtime: &PaddleRuntimeConfig,
+    ) -> Result<ClientBuilder> {
+        let builder = builder.no_proxy();
+        let Some(url) = &runtime.http_proxy else {
+            return Ok(builder);
+        };
+        let proxy = Proxy::all(url).map_err(|_| anyhow!("invalid Paddle HTTP proxy URL"))?;
+        Ok(builder.proxy(proxy))
     }
 
     /// 用调用方建好的 HTTP 客户端。给密钥校验用：校验有自己的超时、不跟随重定向、不重试
@@ -323,7 +340,7 @@ impl PaddleClient {
         Ok(PaddleJsonlDownload { response })
     }
 
-    /// 带超时、不走系统代理的同一个 HTTP 客户端，给 ocr_flow 下载 markdown 插图用。
+    /// 复用任务的超时和 Paddle 代理设置，给 ocr_flow 下载 markdown 插图用。
     /// 之前插图用的是 `Client::new()`：没有超时，一张图卡住整个任务就无限挂起。
     pub fn http_client(&self) -> &Client {
         &self.http
@@ -369,15 +386,6 @@ impl PaddleClient {
             stage, &err, None,
         )))
     }
-}
-
-fn build_http_client(runtime: &PaddleRuntimeConfig) -> Client {
-    Client::builder()
-        .connect_timeout(Duration::from_secs(runtime.request_timeout_secs))
-        .timeout(Duration::from_secs(runtime.request_timeout_secs))
-        .no_proxy()
-        .build()
-        .expect("reqwest client")
 }
 
 fn is_retryable_transport_error(err: &reqwest::Error) -> bool {

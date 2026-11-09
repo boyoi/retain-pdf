@@ -249,6 +249,10 @@ Provider HTTP and retry:
 - `RETAIN_OCR_PROVIDER_CONFIG`: canonical shared Rust/Python registry path; default `backend/config/ocr_providers.json`
 - `RUST_API_OCR_PROVIDER_CONFIG`: compatibility alias used only when the shared variable is unset
 - `RUST_API_PADDLE_BASE_URL`: default `https://paddleocr.aistudio-app.com`
+- `RUST_API_PADDLE_HTTP_PROXY`: optional proxy URL for Paddle credential checks,
+  uploads, polling, result downloads, and Markdown image downloads. When unset,
+  the backend reads the URL from `DATA_ROOT/paddle-http-proxy` if that file
+  exists. Without a Paddle proxy configured, these requests connect directly.
 - `RETAIN_PADDLE_DEFAULT_MODEL`: canonical shared Rust/Python override; default from `backend/config/ocr_providers.json`
 - `RUST_API_PADDLE_DEFAULT_MODEL`: compatibility alias used only when the shared variable is unset
 - `RUST_API_PADDLE_REQUEST_TIMEOUT_SECS`: default `120`

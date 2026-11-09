@@ -231,6 +231,7 @@ impl AppConfig {
         let paths = RuntimePathsConfig::from_env()?;
         create_runtime_dirs(&paths)?;
         let auth = AuthRuntimeConfig::from_env_or_file(&paths.auth_config_path)?;
+        let provider_runtime = ProviderRuntimeConfig::for_data_root(&paths.data_root);
 
         Self::try_from_parts(AppConfigParts {
             paths,
@@ -238,7 +239,7 @@ impl AppConfig {
             server: ServerRuntimeConfig::from_env(),
             upload: UploadRuntimeConfig::from_env(),
             provider_limits: ProviderLimitsConfig::from_env(),
-            provider_runtime: ProviderRuntimeConfig::from_env(),
+            provider_runtime,
             job_runner: JobRunnerConfig::from_env(),
         })
     }
@@ -267,6 +268,7 @@ impl AppConfig {
         let paths = RuntimePathsConfig::from_desktop(resource_root, data_root);
         create_runtime_dirs(&paths)?;
         let auth = AuthRuntimeConfig::from_desktop(simple_port, api_key, 4);
+        let provider_runtime = ProviderRuntimeConfig::for_data_root(&paths.data_root);
 
         Self::try_from_parts(AppConfigParts {
             paths,
@@ -274,7 +276,7 @@ impl AppConfig {
             server: ServerRuntimeConfig::from_desktop(python_bin, port),
             upload: UploadRuntimeConfig::desktop_defaults(),
             provider_limits: ProviderLimitsConfig::from_env(),
-            provider_runtime: ProviderRuntimeConfig::from_env(),
+            provider_runtime,
             job_runner: JobRunnerConfig::from_env(),
         })
     }

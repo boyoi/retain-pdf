@@ -1,7 +1,9 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use super::env_vars::{env_bool, env_string, env_u16, env_u32, env_u64, env_usize};
+use super::env_vars::{
+    env_bool, env_optional_string, env_string, env_u16, env_u32, env_u64, env_usize,
+};
 
 /// Shared escape hatch for self-hosted/local OCR & LLM endpoints (e.g. Ollama on
 /// localhost). When unset, client-supplied provider `base_url` values pointing at
@@ -70,6 +72,7 @@ pub struct MineruRuntimeConfig {
 #[derive(Clone, Debug)]
 pub struct PaddleRuntimeConfig {
     pub default_base_url: String,
+    pub http_proxy: Option<String>,
     pub request_timeout_secs: u64,
     /// 本地文件提交（multipart 上传）单独的超时，不能复用 `request_timeout_secs`：
     /// 上行只有 25–60 KB/s 时 5.2 MB 就要 80 多秒，120s 的请求超时会把 3–7 MB
@@ -110,6 +113,17 @@ impl Default for ProviderLimitsConfig {
 }
 
 impl ProviderRuntimeConfig {
+    pub(super) fn for_data_root(data_root: &Path) -> Self {
+        let mut runtime = Self::from_env();
+        if runtime.paddle.http_proxy.is_none() {
+            runtime.paddle.http_proxy = std::fs::read_to_string(data_root.join("paddle-http-proxy"))
+                .ok()
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty());
+        }
+        runtime
+    }
+
     pub fn from_env() -> Self {
         Self {
             ocr_provider_config_path: super::provider_config::ocr_provider_config_path(),
@@ -176,6 +190,7 @@ impl PaddleRuntimeConfig {
                 "RUST_API_PADDLE_BASE_URL",
                 "https://paddleocr.aistudio-app.com",
             ),
+            http_proxy: env_optional_string("RUST_API_PADDLE_HTTP_PROXY"),
             request_timeout_secs: env_u64("RUST_API_PADDLE_REQUEST_TIMEOUT_SECS", 120),
             upload_timeout_secs: env_u64("RUST_API_PADDLE_UPLOAD_TIMEOUT_SECS", 300),
             upload_timeout_per_mb_secs: env_u64("RUST_API_PADDLE_UPLOAD_TIMEOUT_PER_MB_SECS", 45),

@@ -28,6 +28,7 @@ fn dispatch_intent() -> PipelineDispatchIntent {
 fn runtime(base_url: &str, retry_attempts: usize) -> PaddleRuntimeConfig {
     PaddleRuntimeConfig {
         default_base_url: base_url.to_string(),
+        http_proxy: None,
         request_timeout_secs: 2,
         upload_timeout_secs: 2,
         upload_timeout_per_mb_secs: 0,
@@ -116,7 +117,8 @@ async fn lost_submit_response_is_not_retried_and_recovers_as_ambiguous() {
     });
 
     let base_url = format!("http://{address}");
-    let client = PaddleClient::with_runtime(&base_url, TOKEN, runtime(&base_url, 3));
+    let client = PaddleClient::with_runtime(&base_url, TOKEN, runtime(&base_url, 3))
+        .expect("create Paddle client");
     let error = client
         .submit_remote_url(
             "https://documents.example/source.pdf",
@@ -203,7 +205,8 @@ async fn polling_disconnect_retries_without_losing_durable_receipt() {
     });
 
     let base_url = format!("http://{address}");
-    let client = PaddleClient::with_runtime(&base_url, TOKEN, runtime(&base_url, 2));
+    let client = PaddleClient::with_runtime(&base_url, TOKEN, runtime(&base_url, 2))
+        .expect("create Paddle client");
     let poll = client
         .query_job("paddle-task-1")
         .await
@@ -233,5 +236,99 @@ async fn polling_disconnect_retries_without_losing_durable_receipt() {
         Some("paddle-task-1")
     );
 
+    fs::remove_dir_all(root).expect("remove fixture root");
+}
+
+#[tokio::test]
+async fn paddle_uses_proxy_for_api_and_provider_returned_hosts() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind proxy");
+    let proxy = format!("http://{}", listener.local_addr().expect("proxy address"));
+    let api_url = "http://paddle-api.invalid";
+    let result_url = "http://new-storage-bucket.invalid/result.jsonl";
+    let image_url = "http://new-image-host.invalid/image.png";
+    let root = fixture_root(FIXTURE_PREFIX, "explicit-paddle-proxy");
+    fs::create_dir_all(&root).expect("create upload fixture directory");
+    let pdf = root.join("fixture.pdf");
+    fs::write(&pdf, b"%PDF-1.4 fixture").expect("write upload fixture");
+
+    let server = tokio::spawn(async move {
+        let exchanges = [
+            (
+                format!("POST {api_url}/api/v2/ocr/jobs "),
+                r#"{"data":{"jobId":"paddle-proxy-fixture"}}"#.to_string(),
+                true,
+            ),
+            (
+                format!("GET {api_url}/api/v2/ocr/jobs/paddle-proxy-fixture "),
+                json!({
+                    "data": {
+                        "jobId": "paddle-proxy-fixture",
+                        "state": "done",
+                        "resultUrl": {"jsonUrl": result_url}
+                    }
+                })
+                .to_string(),
+                true,
+            ),
+            (
+                format!("GET {result_url} "),
+                json!({
+                    "result": {
+                        "layoutParsingResults": [{
+                            "markdown": {"text": "fixture", "images": {"fixture.png": image_url}}
+                        }]
+                    }
+                })
+                .to_string(),
+                false,
+            ),
+            (
+                format!("GET {image_url} "),
+                "image-fixture".to_string(),
+                false,
+            ),
+        ];
+        for (request_line, body, authorized) in exchanges {
+            let (mut stream, _) = listener.accept().await.expect("accept proxied request");
+            let bytes = read_http_request(&mut stream).await;
+            let request = String::from_utf8_lossy(&bytes);
+            assert!(request.starts_with(&request_line));
+            let authorization = request.lines().find_map(|line| {
+                let (key, value) = line.split_once(':')?;
+                key.eq_ignore_ascii_case("authorization")
+                    .then(|| value.trim())
+            });
+            let expected = format!("bearer {TOKEN}");
+            assert_eq!(authorization, authorized.then_some(expected.as_str()));
+            write_json_response(&mut stream, &body).await;
+        }
+    });
+
+    let mut config = runtime(api_url, 1);
+    config.http_proxy = Some(proxy);
+    let client = PaddleClient::with_runtime(api_url, TOKEN, config).expect("create Paddle client");
+    let submitted = client
+        .submit_local_file(&pdf, "PaddleOCR-VL-1.6", &json!({}))
+        .await
+        .expect("proxy upload");
+    let polled = client.query_job(&submitted.data).await.expect("proxy poll");
+    let result = client
+        .download_jsonl_result(&polled.data.result_url.expect("result URL").json_url)
+        .await
+        .expect("proxy result download");
+    let image = result.payload["layoutParsingResults"][0]["markdown"]["images"]["fixture.png"]
+        .as_str()
+        .expect("Paddle image URL");
+    let contents = client
+        .http_client()
+        .get(image)
+        .send()
+        .await
+        .expect("proxy image download")
+        .text()
+        .await
+        .expect("read image");
+    assert_eq!(contents, "image-fixture");
+    server.await.expect("proxy task");
     fs::remove_dir_all(root).expect("remove fixture root");
 }

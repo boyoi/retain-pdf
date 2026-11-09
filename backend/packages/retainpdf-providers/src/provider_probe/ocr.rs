@@ -82,9 +82,8 @@ pub async fn validate_paddle_token_view(
     let base_url = payload.base_url.trim().to_string();
     // 校验是用户在等的前台操作：只试一次，不像正式任务那样超时、断连都重试 3 次。
     runtime.request_retry_attempts = 1;
-    let http = policy
-        .http_client_builder()
-        .no_proxy()
+    let http = PaddleClient::configure_http_proxy(policy.http_client_builder(), &runtime)
+        .map_err(|err| AppError::internal(err.to_string()))?
         .build()
         .map_err(|err| AppError::internal(format!("build paddle probe client failed: {err}")))?;
     let client = PaddleClient::with_http_client(base_url, token.to_string(), runtime, http);

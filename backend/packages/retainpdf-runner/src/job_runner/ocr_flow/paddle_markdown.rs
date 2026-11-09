@@ -42,8 +42,8 @@ struct ImageTask<'a> {
     raw_payload: &'a Value,
 }
 
-/// `http` 必须是带超时的客户端（ocr_flow 传的是 PaddleClient 的那个：有超时、
-/// 不走系统代理）。之前这里用 `Client::new()`，没有超时，一张图卡住整个任务就
+/// `http` 必须是带超时的客户端。ocr_flow 复用 PaddleClient 的超时和代理设置。
+/// 之前这里用 `Client::new()`，没有超时，一张图卡住整个任务就
 /// 无限挂起。
 pub(super) async fn materialize_paddle_markdown_artifacts(
     payload: &Value,

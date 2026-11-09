@@ -112,11 +112,11 @@ fn build_paddle_client(
 ) -> Result<PaddleClient> {
     let token = resolve_ocr_provider_token(data_root, job)?
         .unwrap_or_else(|| job.request_payload.ocr.paddle_token.clone());
-    Ok(PaddleClient::with_runtime(
+    PaddleClient::with_runtime(
         job.request_payload.ocr.paddle_api_url.clone(),
         token,
         runtime,
-    ))
+    )
 }
 
 fn execute_mineru_local_transport<'a>(
